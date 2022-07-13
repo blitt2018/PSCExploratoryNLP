@@ -16,7 +16,7 @@ from wordcloud import WordCloud
 import pickle
 import sys
 from collections import Counter  
-
+from transformers import pipeline
 
 class Document: 
 
@@ -24,6 +24,11 @@ class Document:
         self.nlp = nlp
         self.dataFrame = self.formatSlides(slidesCsv)
         
+        #a premade hugging-face/transformers pipeline that seems to work well
+        #for sentiment classification 
+        if "sentAnalysis" in kwargs and kwargs["sentAnalysis"] == True: 
+            self.sentClassifier = pipeline("sentiment-analysis")  
+
         #cutoff for how many lemmas we care about when creating word clouds etc..
         #doesn't seem neccessary anymore... don't want to make this global 
         """
@@ -57,7 +62,7 @@ class Document:
                 
             self.colInfo = colInfo
             self.doubleColInfo = doubleColInfo 
-     
+         
         #we can load dictionaries of word/lemma frequencies to scale our counts by 
         if "freqLists" in kwargs: 
             freqLists = kwargs["freqLists"]
@@ -107,7 +112,9 @@ class Document:
         self.importantTokens = onlyImportant
         
         self.importantLemmas = self.getLemmas(onlyImportant)
-    
+         
+        self.spans = self.getSpans(self.workingDoc) 
+
     def initColumn(self, colName): 
         colInfo = {}
         df = self.dataFrame
@@ -247,8 +254,28 @@ class Document:
     #AND once we get the lemmas they are no longer the spacy objects we may eventually need 
     def getLemmas(self, inList): 
         return [item.lemma_ for item in inList]
+   
+    #get spans from a spacy document object called inDoc
+    #This is the helper since it only takes inDocs and we want to eventually be able to 
+    #call getSpans for a dictionary of workingDocs 
+    def getSpansHelper(self, inDoc): 
+        #now we want to get spans on punctuation 
+        spanList = []
+        spanStart = 0 
+        spanEnd = 0
+        for token in inDoc: 
+            if token.is_punct: 
+                currSpan = inDoc[spanStart:spanEnd]
+                spanList.append(currSpan)
+                spanStart = spanEnd + 1
+            spanEnd += 1
+        return spanList
     
-        
+    #get spans for a document or dictionary of documents. Used during init to assign global var   
+    def getSpans(self, inDoc): 
+        if type(inDoc) != dict: 
+            return self.getSpansHelper(inDoc) 
+
     ##################################################################################33
     #NOTE: start of pipeline to create wordcloud etc...
     
@@ -305,6 +332,57 @@ class Document:
     def getFreqDict(self, inList):
         return self.getFreqDictCutoff(inList, 0)
     
+    #takes a frequency dictionary and returns a version that is "unzipped" 
+    #meaning that it returns a list of tokens and a list of frequencies sorted by frequency 
+    def unZipFreqDict(self, inFreqDict): 
+        freqKeys = sorted(list(inFreqDict.keys()),key=lambda x: inFreqDict[x], reverse=True)
+        freqVals = sorted(list(inFreqDict.values()), reverse=True)
+        return (freqKeys, freqVals) 
+
+    #Takes a list and outputs a dictionary containing the top itemNum # tokens from the inList as well as their frequencies
+    #NOTE: we will need resort that dictionary at some point if using later for graphing etc... 
+    #This is a helper because it can't handle a dictionary as input, so we can only use it for the raw lists of text/spacy objs 
+    def getTopFewHelper(self,inList, itemNum):
+        freqDict = self.getFreqDict(inList)[0]
+        sortedTokens = sorted(list(freqDict.keys()), key=lambda x: freqDict[x], reverse=True)
+        return {k:freqDict[k] for k in sortedTokens[:itemNum]}
+
+    def getTopFew(self, inList, itemNum): 
+        if type(inList) == list: 
+            return self.getTopFewHelper(inList, itemNum)
+    
+    #for a given list of words or spacy tokens, get a dictionary of spans containing these words/tokens
+    def getWordSpans(self, inList): 
+        outDict = {}
+        for span in self.spans: 
+            for word in inList: 
+                word = str(word) 
+                if word in str(span): 
+                    if word not in outDict: 
+                        outDict[word] = [span]
+                    else: 
+                        outDict[word].append(span)
+        return outDict
+
+    #this is used to take out all duplicates from a list of spans
+    #it outputs the exact same list of spans but with spaces at the front if the span is a duplicate 
+    def spaceSpans(self, inSpans):
+        outList = []
+        spanDict = {}
+        for span in inSpans:
+            span = str(span)
+            count = 0
+            #keep adding spaces to item until it does not exist in span dict
+            while count < len(inSpans):
+                spacer = "".join([" " for temp in range(0, count)])
+                newToken = spacer + str(span)
+                if newToken not in spanDict:
+                    spanDict[newToken] = True
+                    outList.append(newToken)
+                    break
+                count +=1
+        return outList
+
     #take input (iterable of spaCy tokens), lemmatize if not already lemmatized, generate 
     #lemmas should be a boolean true or false value for whether or not we scale with lemma dict
     #NOTE: log is used here to even out distribution 
@@ -361,6 +439,52 @@ class Document:
         
         return currFig
     
+    def sentBarChart(self, sentDict): 
+        #unpack dictionary into two sorted lists
+        tokens = sorted(list(sentDict.keys()), key=lambda x: sentDict[x], reverse=False)
+        sents = sorted(list(sentDict.values()), reverse=False)
+
+        green = "#41ae76"
+        red = "#ef6548"
+        colorList = [green if sent > 0 else red for sent in sents]
+        legendElements = []
+        legendElements.insert(0, Patch(facecolor=red,label="Negative"))
+        legendElements.insert(0, Patch(facecolor=green,label="Positive"))
+
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.gca()
+        plt.legend(handles=legendElements,loc='lower right')
+
+        ax.barh(tokens, sents, color=colorList)
+        return ax 
+
+    #create a bar chart using a dictionary of frequencies and a dictionary of word sentiments 
+    def FreqSentBarChart(self, freqDict, sentDict): 
+        sortedTokens = sorted(list(freqDict.keys()), key=lambda x: freqDict[x])
+        sortedSents = [sentDict[item] for item in sortedTokens] 
+        sortedCounts = [freqDict[item] for item in sortedTokens] 
+        greens = ["#99d8c9", "#66c2a4", "#41ae76","#238b45","#005824"]  
+        reds = ["#990000", "#d7301f", "#ef6548", "#fc8d59", "#fdbb84"]
+        colorSpectrum = reds + greens 
+        barColors = []
+        for item in sortedTokens: 
+            itemSent = float(sentDict[item]) 
+            itemColor = "" 
+            for index, currCutoff in enumerate(np.arange(-.8, 1.01, .2)): 
+                #if we don't already have a color and are below the cutoff for the first time 
+                #assign a color and add to barColor list 
+                if itemColor == "" and itemSent <= currCutoff:
+                    itemColor = colorSpectrum[index]
+                    barColors.append(itemColor) 
+        legendElements = []
+        legendElements.insert(0, Patch(facecolor="#41ae76",label="Positive"))
+        legendElements.insert(0, Patch(facecolor="#ef6548",label="Negative"))
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.gca()
+        plt.legend(handles=legendElements,loc='best')
+        ax.barh(sortedTokens, sortedCounts, color=barColors)
+        return ax 
+
     #TODO: create a legend so we know which bars to to which row names 
     def FreqDictBarChartColumn(self, inDict, **kwargs): 
         allTokens = []
@@ -643,4 +767,40 @@ class Document:
         else: 
             print("columns not specified at instantiation (i.e. creation) of document object")
             return None
-            
+   
+    #take a word -> spanList dictionary as input and output word -> sentiment dictionary 
+    def getWordSpanSent(self, inDict): 
+        outDict = {}
+        for word, spanList in inDict.items(): 
+            sents = []
+            for span in spanList: 
+                classified = self.sentClassifier(str(span))[0]
+                if classified["label"] == "NEGATIVE": 
+                    sent = -float(classified["score"])
+                else: 
+                    sent = float(classified["score"])
+                sents.append(sent)
+            outDict[word] = np.mean(sents)
+        return outDict
+
+    #takes spans, creates a dataframe with scores and pos/neg label as integer
+    #then returns the top and bottom "numExamples" number of rows sorted by sentiment score 
+    #example usage would be topDf, bottomDf = docObj.getExtremes(spanList, numExamples)
+    def getExtremes(self, spanList, numExamples): 
+        #it's better to classify entire list (faster) then unpack rather than classify 
+        #one at a time 
+        spanSents = self.sentClassifier([str(item) for item in spanList])
+
+        #the classification (pos, neg) as an int (1, 0)
+        spanClasses = [int(item["label"] == "POSITIVE") for item in spanSents]
+
+        #the classification (pos, neg) as an int (1, 0)
+        spanScores = [float(item["score"]) if item["label"] == "POSITIVE" else -float(item["score"]) for item in spanSents]
+
+        #NOTE: many of the sents seem to be fairly close to 1
+        spanDf = pd.DataFrame({"spans":self.spaceSpans(spanList), "scores":spanScores, "groundTruth":spanClasses})
+        spanDf = spanDf.sort_values("scores")
+        dfLen = len(spanDf)
+        #return the top (positive) numExamples , the bottom (negative) numExamples
+        return (spanDf.iloc[0:numExamples,:], spanDf.iloc[dfLen-numExamples:dfLen])
+
