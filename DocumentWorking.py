@@ -275,6 +275,14 @@ class Document:
     def getSpans(self, inDoc): 
         if type(inDoc) != dict: 
             return self.getSpansHelper(inDoc) 
+        elif type(inDoc) == dict: 
+            outDict = {}
+            for key, workingDoc in inDoc.items(): 
+                outDict[key] = self.getSpansHelper(workingDoc) 
+            return outDict
+        else: 
+            print("Need to pass either a spaCy document object or a dictionary of document objects") 
+            
 
     ##################################################################################33
     #NOTE: start of pipeline to create wordcloud etc...
@@ -786,7 +794,7 @@ class Document:
     #takes spans, creates a dataframe with scores and pos/neg label as integer
     #then returns the top and bottom "numExamples" number of rows sorted by sentiment score 
     #example usage would be topDf, bottomDf = docObj.getExtremes(spanList, numExamples)
-    def getExtremes(self, spanList, numExamples): 
+    def getExtremesHelper(self, spanList, numExamples): 
         #it's better to classify entire list (faster) then unpack rather than classify 
         #one at a time 
         spanSents = self.sentClassifier([str(item) for item in spanList])
@@ -802,5 +810,73 @@ class Document:
         spanDf = spanDf.sort_values("scores")
         dfLen = len(spanDf)
         #return the top (positive) numExamples , the bottom (negative) numExamples
-        return (spanDf.iloc[0:numExamples,:], spanDf.iloc[dfLen-numExamples:dfLen])
+        return (spanDf.iloc[0:numExamples,:].sort_values("scores", ascending=False),  spanDf.iloc[dfLen-numExamples:dfLen]) 
 
+    def getExtremes(self, inObj, numExamples): 
+        if type(inObj) != dict: 
+            return self.getExtremesHelper(inObj, numExamples)
+        else:
+            outDict = {}
+            for key, spanList in inObj.items(): 
+                outDict[key] = self.getExtremesHelper(spanList, numExamples)
+            return outDict
+
+    def plotExtremesHelper(self, inTup, figsize=(20, 10)): 
+        #get fig set up, may have to have user cha
+        fig = plt.figure(figsize=(20, 10))
+        ax = fig.gca()
+
+        green = "#41ae76"
+        orange = "#ef6548"
+        colors = [orange for i in range(0, len(inTup[0]))] + [green for i in range(0, len(inTup[1]))]
+
+        #plot the bar chart
+        ax.barh(pd.concat([inTup[0].spans, inTup[1].spans]), pd.concat([pd.Series([-item for item in inTup[0].scores]), inTup[1].scores]), color=colors)
+
+        #frame the bars so that we can actually see the difference, even if it is very small
+        xmin = min(pd.concat([pd.Series([-item for item in inTup[0].scores]), inTup[1].scores]))
+        xmax = max(pd.concat([pd.Series([-item for item in inTup[0].scores]), inTup[1].scores]))
+        xbuffer = .1 * (xmax-xmin)
+        ax.set_xlim(xmin-xbuffer, xmax+xbuffer)
+
+        #need to redraw so we can grab ticklabels
+        plt.draw()
+        #grab ticklabels and format with 5 decimal places and pad with zeros if we don't have enough 
+        newTicks = ['{0:.5f}'.format(round(float(item.get_text()), 5)) for item in ax.xaxis.get_ticklabels()]
+        ax.xaxis.set_ticklabels(newTicks)
+
+        #add legend
+        legendElements = []
+        legendElements.insert(0, Patch(facecolor=orange,label="Negative"))
+        legendElements.insert(0, Patch(facecolor=green,label="Positive"))
+        ax.legend(handles=legendElements,loc='best')
+
+        return fig
+
+    def plotExtremes(self, inObj, figsize=(20, 10)): 
+        if type(inObj) != dict: 
+            return self.plotExtremesHelper(inObj, figsize)
+        else: 
+            #create as many Axes as we have values of whatever variable we split by (Persona perhaps)
+            fig, axs  = plt.subplots(len(inObj.keys()), 1, figsize=(13, 9))
+
+
+            #enumerate through these dictionary keys in specific order
+            for index, items in enumerate(inObj.items()):
+                #values in dictionary
+                key, val = items
+
+                green = "#41ae76"
+                orange = "#ef6548"
+                colors = [orange for i in range(0, len(val[0]))] + [green for i in range(0, len(val[1]))]
+
+                axs[index].barh(pd.concat([val[0].spans, val[1].spans]), pd.concat([pd.Series([-item for item in val[0].scores]), val[1].scores]), color=colors)
+
+                #frame the bars so that we can actually see the difference, even if it is very small
+                xmin = min(pd.concat([pd.Series([-item for item in val[0].scores]), val[1].scores]))
+                xmax = max(pd.concat([pd.Series([-item for item in val[0].scores]), val[1].scores]))
+                xbuffer = .1 * (xmax-xmin)
+                axs[index].set_xlim(xmin-xbuffer, xmax+xbuffer)
+
+                axs[index].set_title(key, size=14)
+            return fig
