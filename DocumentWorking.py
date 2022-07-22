@@ -439,13 +439,18 @@ class Document:
             return outDict
         else: 
             return self.getScaledFreqDictCutoffHelper(inList, lemmas, cutoff)
-        
-    def FreqDictBarChart(self, inDict, **kwargs): 
+    
+    #create a bar chart from a dictionary of words and their frequencies 
+    #input: dictionary, optional dimensions argument, any kwargs that would go to barh in matplotlib  
+    #output: a matplotlib figure object that can be further styled 
+    def freqDictBarChart(self, inDict, dimensions=(10, 10), **kwargs): 
         sortedTokens = sorted(list(inDict.keys()), key=lambda x: inDict[x])
         sortedCounts = [inDict[item] for item in sortedTokens] 
-        currFig = plt.barh(sortedTokens, sortedCounts, **kwargs)
+        fig = plt.figure(figsize = dimensions)
+        ax = fig.gca()
+        bars = ax.barh(sortedTokens, sortedCounts, **kwargs)
         
-        return currFig
+        return fig 
     
     def sentBarChart(self, sentDict): 
         #unpack dictionary into two sorted lists
@@ -643,7 +648,7 @@ class Document:
         return (fig, ax) 
  
     #we sort the tokens before zipping to our 
-    def ColoredFreqDictBarChart(self, inDict, **kwargs): 
+    def coloredFreqDictBarChart(self, inDict, dimensions=(10, 10), **kwargs): 
         sortedTokens = sorted(list(inDict.keys()), key=lambda x: inDict[x])
         sortedCounts = [inDict[item] for item in sortedTokens]
         
@@ -653,10 +658,11 @@ class Document:
         #used to assign colors consistently
         colorDict = dict(zip(sortedTokens, palette))
         
+        fig = plt.figure(figsize=dimensions)
         #plot tokens, counts sorted according to tokens, and with colors assigned to sorted tokens 
-        toReturn = plt.barh(sortedTokens, sortedCounts, color=[colorDict[token] for token in sortedTokens], **kwargs)
+        plt.barh(sortedTokens, sortedCounts, color=[colorDict[token] for token in sortedTokens], **kwargs)
         
-        return toReturn 
+        return fig 
     
     #take us to the color space needed for wordcloud 
     def toWordCloudColors(self, inPalette): 
@@ -666,7 +672,45 @@ class Document:
             outPalette.append(newTup)
         return outPalette
     
-    def CreateWordCloud(self, inDict, **kwargs): 
+    #create a basic word cloud colored randomly 
+    def wordCloud(self, inDict, dimensions=(10, 10), wcDimensions = (1000, 600), **kwargs):
+         
+        #set up some defaults that can be changed if input into key word args when function is called 
+        #we can add an avoidList to remove certain words 
+        if "avoidList" in kwargs: 
+            toAvoid = kwargs["avoidList"]
+        else: 
+            toAvoid = []
+
+        #what item should we be joining our words with 
+        #dash by default 
+        if "joinWith" in kwargs:
+            joinWith = kwargs["joinWith"]
+        else: 
+            joinWith = "_"
+       
+        fig = plt.figure(figsize=dimensions)
+
+        #unpack dimensions passed by user (or defaults used) 
+        height_ = wcDimensions[1]
+        width_ = wcDimensions[0]
+
+        #create the wordcloud from word frequencies  
+        wc = WordCloud(width=width_, height=height_, background_color="#f3f3f3ff",colormap="Dark2").generate_from_frequencies(inDict)
+        
+        plt.imshow(wc, interpolation="bilinear")
+        plt.axis("off")
+        
+        return fig 
+                
+
+    #create word cloud. Colored the same way as the colored bar chart, so we can use the bar chart as legend
+    #input: dictionary of words and their counts, optional dimensions argument, optional wcDimensions argument, optional dpi argument
+    #optional keyword arguments: avoidList = list of words to remove
+    #output: a matplotlib figure object 
+    #NOTE: what happens is that the wordcloud is scaled to fit in the box created by "dimensions" (i.e. mpl figure)  
+    #the actual proportions of the plot are determined in the wcDimensions which are used by the wordcloud library 
+    def wordCloudMatching(self, inDict, dimensions=(10, 10), wcDimensions = (1000, 600) ,**kwargs): 
         
         #set up some defaults that can be changed if input into key word args when function is called 
         #we can add an avoidList to remove certain words 
@@ -681,8 +725,15 @@ class Document:
             joinWith = kwargs["joinWith"]
         else: 
             joinWith = "_"
-        
-        wc = WordCloud(background_color="#f0f2f5", height=500, width=800).generate_from_frequencies(inDict)
+       
+        fig = plt.figure(figsize=dimensions)
+
+        #unpack dimensions passed by user (or defaults used) 
+        height_ = wcDimensions[1]
+        width_ = wcDimensions[0]
+
+        #create the wordcloud from word frequencies  
+        wc = WordCloud(background_color="#f0f2f5", width=width_, height=height_).generate_from_frequencies(inDict)
         
         #get tokens from inDict (keys), sort them according to their freq
         #the sorting keeps things consistent with frequency dict bar chart
@@ -692,12 +743,12 @@ class Document:
         #zip to tokens
         #color with dictionary of zip
         palette = self.toWordCloudColors(sns.husl_palette(len(sortedTokens)))
-        print(palette)
         paletteDict = dict(zip(sortedTokens, palette))
         wc.recolor(color_func=lambda word, **kwargs: paletteDict[word])
         
         plt.imshow(wc, interpolation="bilinear")
         plt.axis("off")
+        return plt.gcf()
      
         
     #we take a dictionary of dictionaries as input and create word cloud colored according to 
