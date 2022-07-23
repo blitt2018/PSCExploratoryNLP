@@ -358,7 +358,16 @@ class Document:
     def getTopFew(self, inList, itemNum): 
         if type(inList) == list: 
             return self.getTopFewHelper(inList, itemNum)
-    
+        else: 
+            outDict = {}
+
+            #remember that in this case inList is a dictionary 
+            if type(inList) != dict: 
+                print("input to function must be either a dictionary or a list") 
+            for key, value in inList.items(): 
+                outDict[key] = self.getTopFewHelper(value, itemNum)    
+            return outDict 
+
     #for a given list of words or spacy tokens, get a dictionary of spans containing these words/tokens
     def getWordSpans(self, inList): 
         outDict = {}
@@ -450,6 +459,10 @@ class Document:
         ax = fig.gca()
         bars = ax.barh(sortedTokens, sortedCounts, **kwargs)
         
+        #add a default x margin and bar labels, can be overriden afterwards if need be 
+        ax.margins(x=.1)
+        ax.bar_label(bars, fontsize=16) 
+
         return fig 
     
     def sentBarChart(self, sentDict): 
@@ -499,7 +512,7 @@ class Document:
         return ax 
 
     #TODO: create a legend so we know which bars to to which row names 
-    def FreqDictBarChartColumn(self, inDict, **kwargs): 
+    def freqDictBarChartColumn(self, inDict, **kwargs): 
         allTokens = []
         allCounts = []
         
@@ -550,7 +563,7 @@ class Document:
     #figx = figure width in inch
     #left = left margin in units of bar width
     #right = right margin in units of bar width
-    def FreqDictBarChartColumnSplit(self, inDict, barwidth, spacing, figx, top, bottom, left, right ,**kwargs):      
+    def freqDictBarChartColumnSplit(self, inDict, barwidth, spacing, figx, top, bottom, left, right ,**kwargs):      
         #the total number of subplots we will have 
         tc = len(inDict.keys())
         print("num of cats: " + str(tc))
@@ -604,48 +617,19 @@ class Document:
                      (max_values[index]+1)*barwidth/figy ] 
 
             ax = fig.add_axes(coord, sharex=ax)
-            ax.barh(y_ticks, values, color=palette[index])
+            bars = ax.barh(y_ticks, values, color=palette[index])
             ax.set_ylim(0, max_values[index] + 1)  # limit the y axis for fixed height
             ax.set_yticks(y_ticks)
             ax.set_yticklabels(entries)
             ax.invert_yaxis()
             ax.set_title(key, loc="left")
-            index += 1
-            """        
-            #NOTE: this sorting is what will keep things consistent when creating word cloud 
-            keys = sorted(list(inDict.keys()))
-            
-            #NOTE: potentially add default figure size?
-            #get axes equal to number of keys in the inDictionary 
-            if "figsize" not in kwargs: 
-                print("specify figure dimensions with figsize = (dim1 ,dim2)")
-                sys.exit() 
-            else: 
-                pFigsize = kwargs["figsize"]
-            #make sure bar width is specified as well 
-            if "width" not in kwargs: 
-                print("specify bar width for subplots by specifying width = barWidth") 
-                sys.exit()
-            else: 
-                pWidth = kwargs["width"]
 
-            fig, ax = plt.subplots(len(palette), 1, figsize=pFigsize)
-            for i in range(0, len(keys)):
-                currKey = keys[i]
-                thisDict = inDict[currKey]
-     
-            #ax[i, 1].barh(inDict.)    
-#            print(inDict[currKey].items())
-        
-            #ax[i].barh(inDict[currKey])       
-             
-            sortedTokens = sorted(list(thisDict.keys()), key=lambda x:thisDict[x])
-            sortedCounts = [thisDict[item] for item in sortedTokens]
-            
-            ax[i].barh(sortedTokens, sortedCounts, )
-            return (fig, ax) 
-            """
-        return (fig, ax) 
+            #add bar chart labels 
+            ax.margins(x=.1)
+            ax.bar_label(bars, fontsize=12) 
+
+            index += 1
+        return fig 
  
     #we sort the tokens before zipping to our 
     def coloredFreqDictBarChart(self, inDict, dimensions=(10, 10), **kwargs): 
