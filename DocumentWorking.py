@@ -107,11 +107,9 @@ class Document:
 
         self.allTokens = [item for item in self.workingDoc]
         #this will return a list of tokens 
-        onlyImportant = self.getImportantWordList(self.allTokens)
+        self.importantTokens = self.getImportantTokenStrs(self.allTokens)
         
-        self.importantTokens = onlyImportant
-        
-        self.importantLemmas = self.getLemmas(onlyImportant)
+        self.importantLemmas = self.getLemmas(self.getImportantTokenList(self.allTokens))
          
         self.spans = self.getSpans(self.workingDoc) 
 
@@ -131,9 +129,9 @@ class Document:
             allTokens = [item for item in workingDoc]
             
             #this will return a list of tokens 
-            onlyImportant = self.getImportantWordList(allTokens)
+            onlyImportant = self.getImportantTokenStrs(allTokens)
 
-            importantLemmas = self.getLemmas(onlyImportant)
+            importantLemmas = self.getLemmas(self.getImportantTokenList(allTokens))
             
             #the same information/items that we have for the whole dataframe (same variable names)
             #but subsetted for this column and rowName subset
@@ -142,8 +140,7 @@ class Document:
             colInfo[rowName] = subsetDict
         return colInfo
     
-    def initColumns(self, colNames): 
-        colInfo = {}
+    def initColumns(self, colNames): colInfo = {}
         df = self.dataFrame
 
         #just grab column names from list (i.e. colNames is a list) 
@@ -164,9 +161,9 @@ class Document:
                 allTokens = [item for item in workingDoc]
             
                 #this will return a list of tokens 
-                onlyImportant = self.getImportantWordList(allTokens)
+                onlyImportant = self.getImportantTokenStrs(allTokens)
 
-                importantLemmas = self.getLemmas(onlyImportant)
+                importantLemmas = self.getLemmas(self.getImportantTokenList(allTokens))
             
                 #the same information/items that we have for the whole dataframe (same variable names)
                 #but subsetted for this column and rowName subset
@@ -235,9 +232,11 @@ class Document:
     #inText is a string 
     #returns a string but cleaned of chars we don't need
     def removeJunkChars(self, inText): 
-        
+        #replace forward slashes with the word "or" 
+        allText = inText.replace("/"," or ") 
+
         #remove all characters that aren't punctuation letters or numbers 
-        allText = re.sub("[^a-zA-Z0-9 \.!\?']", "", inText)
+        allText = re.sub("[^a-zA-Z0-9 \.!\?']", "", allText)
 
         #replace all punctuation that has no words between it with period. Keep one space on right side
         allText = re.sub("(\s*(\.|!|\?)\s*)+", ". ", allText)
@@ -247,9 +246,15 @@ class Document:
     #takes a list of SPACY tokens and outputs a list of "important" words, i.e. words that 
     #contain meaning and aren't spaces or punctuation
     #note, these tokens are SPACY tokens, so they have all the right pos tagging etc
-    def getImportantWordList(self, inList): 
+    def getImportantTokenStrs(self, inList): 
+        #we need lowercase because that will help us get the overlap between words when we count them etc... 
+        return [item.lower_ for item in inList if item.is_stop == False and len(str(item).strip()) > 0 and item.pos_ != "PUNCT"]
+
+    def getImportantTokenList(self, inList): 
+        #we need lowercase because that will help us get the overlap between words when we count them etc... 
         return [item for item in inList if item.is_stop == False and len(str(item).strip()) > 0 and item.pos_ != "PUNCT"]
-    
+ 
+
     #get lemmas for a given list. Bear in mind we can't get lemmas if we don't have spacy objects to work with
     #AND once we get the lemmas they are no longer the spacy objects we may eventually need 
     def getLemmas(self, inList): 
@@ -332,7 +337,7 @@ class Document:
         
         #create counter object 
         countDict = Counter(inList)
-        overCutoff = {k:v for k, v in countDict.items() if v > cutoff}
+        overCutoff = {str(k).strip():v for k, v in countDict.items() if v > cutoff}
         sortedTokens = sorted(list(overCutoff.keys()), key=lambda x: overCutoff[x])
         sortedCounts = [overCutoff[item] for item in sortedTokens]
         return overCutoff, sortedTokens, sortedCounts
@@ -461,7 +466,7 @@ class Document:
         
         #add a default x margin and bar labels, can be overriden afterwards if need be 
         ax.margins(x=.1)
-        ax.bar_label(bars, fontsize=16) 
+        ax.bar_label(bars, fontsize=16, padding=3) 
 
         return fig 
     
@@ -626,7 +631,7 @@ class Document:
 
             #add bar chart labels 
             ax.margins(x=.1)
-            ax.bar_label(bars, fontsize=12) 
+            ax.bar_label(bars, fontsize=12, padding=3) 
 
             index += 1
         return fig 
@@ -645,6 +650,9 @@ class Document:
         fig = plt.figure(figsize=dimensions)
         #plot tokens, counts sorted according to tokens, and with colors assigned to sorted tokens 
         plt.barh(sortedTokens, sortedCounts, color=[colorDict[token] for token in sortedTokens], **kwargs)
+        ax = plt.gca()
+        ax.bar_label(ax.containers[0], fontsize=16, padding=3)
+        ax.margins(x=.2) 
         
         return fig 
     
