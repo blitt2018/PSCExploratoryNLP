@@ -140,7 +140,8 @@ class Document:
             colInfo[rowName] = subsetDict
         return colInfo
     
-    def initColumns(self, colNames): colInfo = {}
+    def initColumns(self, colNames):
+        colInfo = {}
         df = self.dataFrame
 
         #just grab column names from list (i.e. colNames is a list) 
@@ -374,12 +375,23 @@ class Document:
             return outDict 
 
     #for a given list of words or spacy tokens, get a dictionary of spans containing these words/tokens
-    def getWordSpans(self, inList): 
+    #TODO: address how this can cause a problem when we have lemmas so we won't find them in the spans 
+    #variant specifies what type of string variant (lemmatized, regular token, stem,..) we are looking for in our spans 
+    def getWordSpans(self, inList, variant="token"): 
         outDict = {}
         for span in self.spans: 
             for word in inList: 
                 word = str(word) 
-                if word in str(span): 
+                altSpan = ""
+
+                #can add more variants in the future if need be. "stem" for example 
+                if variant == "token": 
+                    altSpan = " ".join([str(item).lower() for item in span])
+                    
+                if variant == "lemma": 
+                    altSpan = " ".join([str(item.lemma_).lower() for item in span])
+
+                if word.lower() in altSpan: 
                     if word not in outDict: 
                         outDict[word] = [span]
                     else: 
@@ -486,7 +498,12 @@ class Document:
         ax = fig.gca()
         plt.legend(handles=legendElements,loc='lower right')
 
-        ax.barh(tokens, sents, color=colorList)
+        bars = ax.barh(tokens, sents, color=colorList)
+
+        #add a default x margin and bar labels, can be overriden afterwards if need be 
+        ax.margins(x=.15)
+        ax.bar_label(bars, fontsize=16, padding=3, fmt="%1.2f") 
+
         return ax 
 
     #create a bar chart using a dictionary of frequencies and a dictionary of word sentiments 
@@ -513,7 +530,12 @@ class Document:
         fig = plt.figure(figsize=(10, 10))
         ax = fig.gca()
         plt.legend(handles=legendElements,loc='best')
-        ax.barh(sortedTokens, sortedCounts, color=barColors)
+        bars = ax.barh(sortedTokens, sortedCounts, color=barColors)
+
+        #add a default x margin and bar labels, can be overriden afterwards if need be 
+        ax.margins(x=.1)
+        ax.bar_label(bars, fontsize=16, padding=3) 
+
         return ax 
 
     #TODO: create a legend so we know which bars to to which row names 
@@ -841,12 +863,14 @@ class Document:
         #it's better to classify entire list (faster) then unpack rather than classify 
         #one at a time 
         spanSents = self.sentClassifier([str(item) for item in spanList])
+        print(spanSents)
 
         #the classification (pos, neg) as an int (1, 0)
         spanClasses = [int(item["label"] == "POSITIVE") for item in spanSents]
 
-        #the classification (pos, neg) as an int (1, 0)
-        spanScores = [float(item["score"]) if item["label"] == "POSITIVE" else -float(item["score"]) for item in spanSents]
+        #make all the sentiments positive so that we can plot them side by side 
+        #pos/neg will be indicated by color 
+        spanScores = [float(item["score"]) if float(item["score"]) > 0 else -float(item["score"]) for item in spanSents]
 
         #NOTE: many of the sents seem to be fairly close to 1
         spanDf = pd.DataFrame({"spans":self.spaceSpans(spanList), "scores":spanScores, "groundTruth":spanClasses})
@@ -866,7 +890,7 @@ class Document:
 
     def plotExtremesHelper(self, inTup, figsize=(20, 10)): 
         #get fig set up, may have to have user cha
-        fig = plt.figure(figsize=(20, 10))
+        fig = plt.figure(figsize=figsize)
         ax = fig.gca()
 
         green = "#41ae76"
@@ -901,7 +925,7 @@ class Document:
             return self.plotExtremesHelper(inObj, figsize)
         else: 
             #create as many Axes as we have values of whatever variable we split by (Persona perhaps)
-            fig, axs  = plt.subplots(len(inObj.keys()), 1, figsize=(13, 9))
+            fig, axs  = plt.subplots(len(inObj.keys()), 1, figsize=figsize)
 
 
             #enumerate through these dictionary keys in specific order
