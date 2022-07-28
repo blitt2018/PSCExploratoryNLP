@@ -15,6 +15,9 @@ import seaborn as sns
 from wordcloud import WordCloud
 import pickle
 import sys
+import scipy 
+from scipy import spatial
+from scipy.cluster.hierarchy import dendrogram, linkage
 from collections import Counter  
 from transformers import pipeline
 
@@ -863,14 +866,15 @@ class Document:
         #it's better to classify entire list (faster) then unpack rather than classify 
         #one at a time 
         spanSents = self.sentClassifier([str(item) for item in spanList])
-        print(spanSents)
+        #print(spanSents)
 
         #the classification (pos, neg) as an int (1, 0)
         spanClasses = [int(item["label"] == "POSITIVE") for item in spanSents]
 
         #make all the sentiments positive so that we can plot them side by side 
         #pos/neg will be indicated by color 
-        spanScores = [float(item["score"]) if float(item["score"]) > 0 else -float(item["score"]) for item in spanSents]
+        #spanScores = [float(item["score"]) if float(item["score"]) > 0 else -float(item["score"]) for item in spanSents]
+        spanScores = [-float(item["score"]) if item["label"] == "NEGATIVE" else float(item["score"]) for item in spanSents] 
 
         #NOTE: many of the sents seem to be fairly close to 1
         spanDf = pd.DataFrame({"spans":self.spaceSpans(spanList), "scores":spanScores, "groundTruth":spanClasses})
@@ -895,14 +899,26 @@ class Document:
 
         green = "#41ae76"
         orange = "#ef6548"
-        colors = [orange for i in range(0, len(inTup[0]))] + [green for i in range(0, len(inTup[1]))]
+        #colors = [orange for i in range(0, len(inTup[0]))] + [green for i in range(0, len(inTup[1]))]
+        sentDf = pd.concat([inTup[0], inTup[1]]).reset_index()
+
+        #get correct colors and scores for compact/visually appealing plotting
+        colors = []
+        sentStrength = []
+        for i in range(0, len(inTup[0]) + len(inTup[1])): 
+            #make colors based off of positive or negative value of sentiment 
+            currScore = sentDf.at[i, "scores"]
+            colors.append(green if currScore >= 0 else orange) 
+
+            #turn scores to positive
+            sentStrength.append(-currScore if currScore < 0 else currScore) 
 
         #plot the bar chart
-        ax.barh(pd.concat([inTup[0].spans, inTup[1].spans]), pd.concat([pd.Series([-item for item in inTup[0].scores]), inTup[1].scores]), color=colors)
+        ax.barh(sentDf.spans, sentStrength, color=colors)
 
         #frame the bars so that we can actually see the difference, even if it is very small
-        xmin = min(pd.concat([pd.Series([-item for item in inTup[0].scores]), inTup[1].scores]))
-        xmax = max(pd.concat([pd.Series([-item for item in inTup[0].scores]), inTup[1].scores]))
+        xmin = min(sentStrength)
+        xmax = max(sentStrength) 
         xbuffer = .1 * (xmax-xmin)
         ax.set_xlim(xmin-xbuffer, xmax+xbuffer)
 
@@ -935,15 +951,254 @@ class Document:
 
                 green = "#41ae76"
                 orange = "#ef6548"
-                colors = [orange for i in range(0, len(val[0]))] + [green for i in range(0, len(val[1]))]
+                #colors = [orange for i in range(0, len(val[0]))] + [green for i in range(0, len(val[1]))]
+                #set colors and scores so that they plot correctly and according to signs of the scores 
 
-                axs[index].barh(pd.concat([val[0].spans, val[1].spans]), pd.concat([pd.Series([-item for item in val[0].scores]), val[1].scores]), color=colors)
+                sentDf = pd.concat([val[0], val[1]]).reset_index()
+
+                #get correct colors and scores for compact/visually appealing plotting
+                colors = []
+                sentStrength = []
+                #TODO: this was taken from helper method, make it work here
+                for i in range(len(sentDf)): 
+                    #make colors based off of positive or negative value of sentiment 
+                    currScore = sentDf.at[i, "scores"]
+                    colors.append(green if currScore >= 0 else orange) 
+
+                    #turn scores to positive
+                    sentStrength.append(-currScore if currScore < 0 else currScore) 
+                axs[index].barh(sentDf.spans, sentStrength, color=colors)
 
                 #frame the bars so that we can actually see the difference, even if it is very small
-                xmin = min(pd.concat([pd.Series([-item for item in val[0].scores]), val[1].scores]))
-                xmax = max(pd.concat([pd.Series([-item for item in val[0].scores]), val[1].scores]))
+                xmin = min(sentStrength)
+                xmax = max(sentStrength)
                 xbuffer = .1 * (xmax-xmin)
                 axs[index].set_xlim(xmin-xbuffer, xmax+xbuffer)
 
                 axs[index].set_title(key, size=14)
+                #grab ticklabels and format with 5 decimal places and pad with zeros if we don't have enough 
+                #newTicks = ['{0:.5f}'.format(round(float(item.get_text()), 5)) if len(item.get_text().strip()) > 0 else "" for item in axs[index].xaxis.get_ticklabels()]
+                
+            #We need to draw the figure so we can access the tick label strings 
+            plt.draw()
+
+            #format axis labels 
+            for ax in fig.axes: 
+                #grab ticklabels and format with 5 decimal places and pad with zeros if we don't have enough 
+                newTicks = ['{0:.4f}'.format(round(float(item.get_text()), 5)) if len(item.get_text().strip()) > 0 else "" for item in ax.xaxis.get_ticklabels()]
+                
+                ax.xaxis.set_ticklabels(newTicks)
             return fig
+
+
+    #get spans using stock spacy sentance/span level vectors 
+    #it doesn't seem that adding all span vectors together works very well 
+    def getSentSim(self, spanList): 
+        #spanList is now the object of interest
+        #add this as an attribute of the Document object eventually 
+        #create nested list as similarity matrix 
+        spanSim = []
+        for span1 in spanList: 
+            currSims = []
+            for span2 in spanList: 
+                currSims.append(span1.similarity(span2))
+            spanSim.append(currSims)
+
+        return spanSim
+
+    def getVectorDist(self, inList): 
+        outerList = []
+        for i in inList: 
+            innerList = []
+            for j in inList:
+                innerList.append(spatial.distance.cosine(i, j))
+            outerList.append(innerList)
+        return outerList
+
+    """
+    Subset list is one of the lists from subsetColumns given when initializing the Document object.
+    It specifies first what information we will be taking a slice of to create the tree, and
+    what information will be used to color the tree.
+
+    cleaningLevel is the level of information that we want to take. Right now we should always use "workingDoc",
+    since we need actual spaCy documents to get spans and calculate span similarity.
+
+    simFunction. This is a string that specifies how to calculate similarity. String correlates to name of method in this object.  
+
+    Key is the "slice" to take.
+
+    tags are the parts of speech to use when working with simFunction getPOSSim. 
+
+    For example, we could have:
+    key = 'How do they first discover the existence of AG2PI & what are they looking for?'
+    clusterSentEmbeddings(["Touchpoint", "Persona"], "workingDoc", key)
+
+    which would take answers to the question "How do they first discover the existence of AG2PI & what are they looking for"
+    colored by Persona, using text from the workingDoc text created during the automatic cleaning of the data
+    that occurs when creating Document.
+    """
+
+    def clusterSentEmbeddings(self, subsetList, simFunction, inKey, ax=None, figsize=(10, 10), cleaningLevel="workingDoc", tags=["NOUN", "VERB", "ADJ", "ADV"]):
+        #example
+        #personaDict = doc.getDoubleColSubAttributeDict(["Touchpoint", "Persona"], "workingDoc")
+        #inKey = 'How do they first discover the existence of AG2PI & what are they looking for?'
+
+        #get a nested dictionary of items with keys being the unique values in the subset list columns
+        #the cleaning level is which type of text data to grab. Default is workingDoc
+        personaDict = self.getDoubleColSubAttributeDict(subsetList, cleaningLevel)
+
+        """
+        recreate the nested dictionary but get the spans instead of having the working doc
+        this dictionary has touchpoints as the outer key and personas as the inner, so we can easily split by persona
+        for a particular toucpoint
+        """
+        spanDict = {}
+        for outerKey in personaDict.keys():
+            spanDict[outerKey] = {}
+            for innerKey in personaDict[outerKey].keys():
+                spanDict[outerKey][innerKey] =self.getSpans(personaDict[outerKey][innerKey])
+
+        #we most likely also only want to get dictionaries for one value of the touchpoint
+        keyDictSpans = spanDict[inKey]
+        
+        #now add spaces so there are technically no double spans in keyDict
+        #use temporary dictionary to hold items while changing them
+        inSpans = {}
+
+        #need to do deepcopy here
+        keyDict = {}
+
+        for key in keyDictSpans.keys():
+            keyDict[key] = [None for item in range(0, len(keyDictSpans[key]))]
+            for index, span in enumerate(keyDictSpans[key]):
+                spaceSpan = str(span)
+
+                #add as many spaces to this span as needed so that there are no doubles, tripes
+                #etc.. in our span list when we go to create plot/assign colors
+                while spaceSpan in inSpans:
+                    spaceSpan += " "
+
+                inSpans[spaceSpan] = True
+
+                #replace non-spaced version of span with space span
+                keyDict[key][index] = spaceSpan
+
+        #get colors, map to keys in dictionary created above
+        colorListFull = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33", "#a65628", "#f781bf", "#999999"]
+        colorListFull = [item.upper() for item in colorListFull]
+        colorKeyMapping = dict(zip(sorted(list(keyDict.keys())), colorListFull[:len(keyDict.keys())]))
+
+        #make sure legend order matches with colors
+        legendElements = []
+        for index, key in enumerate(sorted(list(keyDict.keys()))):
+            currColor = colorListFull[index]
+            legendElements.insert(0, Patch(facecolor=currColor,label=key))
+
+        #map each span to the color associated with its key in keyDict
+        #this way we can easily grab the color for any span when plotting
+        colorSpanMapping = {
+            str(span):colorKeyMapping[key]
+            for key, val in keyDict.items()
+            for span in val}
+
+        #NOTE: we should be ok matching the spans to the strings because we sort the keys when we iterate
+        #and we maintain the order of items in the lists within keyDictSpans
+        #create list of all spans
+        spanList = []
+        for k in sorted(list(keyDictSpans.keys())):
+            spanList += keyDictSpans[k]
+
+        #create list of all string versions of spans (with spaces )
+        labelList = []
+        for k in sorted(list(keyDict.keys())):
+            labelList += keyDict[k]
+        
+        simList = []
+        if simFunction == "getSentSim": 
+            simList = self.getSentSim(spanList)
+        
+        if simFunction == "getPOSSim": 
+            simList = self.getPOSSim(spanList, tags) 
+
+        simList = np.array(simList)
+
+        #get linkage
+        linked = linkage(simList, "complete")
+
+        #COLORING
+        #black
+        defaultColor = "#000000"
+
+        link_cols = {}
+
+        #go through only the first two columns of the linkage matrix (which contain linkage information)
+        #enumerate gives both an index (i) and the object in our data source (a 2d row of linkage)
+        for i, i12 in enumerate(linked[:,:2].astype(int)):
+
+            #for x in i12 iterates through nodes linked in this cluster
+            #gets the color of either the nodes (if leaves) or subtrees (if not leaves i.e. x > len(Z)) being linked
+            c1, c2 = (link_cols[x] if x > len(linked) else colorSpanMapping[labelList[x]] for x in i12)
+
+            #if the colors are the same, then make merged tree of c1 and c2 (located at i + 1 + len(Z)) have same color
+            #as the subtrees. IF NOT, simply use default color
+            #link_cols[i+1+len(linked)] = c1 if (c1 == c2 or i12[0] < len(linked) or i12[1] < len(linked)) else defaultColo
+            link_cols[i+1+len(linked)] = c1 if (c1 == c2) else defaultColor
+
+        #the link function is basically saying, what should I color the upside-down U part of the tree that
+        #links two subtrees
+        
+        fig = plt.figure(figsize=figsize) 
+        
+        if ax is None:
+            ax = plt.gca()
+
+        D = dendrogram(Z=linked, labels=labelList, orientation="left",color_threshold=None, link_color_func=lambda x: link_cols[x])
+
+        #note that the axis labels are text objects
+        for leaf in ax.yaxis.get_ticklabels():
+            leaf.set_color(colorSpanMapping[leaf.get_text()])
+
+        ax.legend(handles=legendElements,loc='upper left')
+        #ax.set_title(inKey)
+        print(inKey)
+        return fig, ax
+
+    #for an input list of sentances, sum together the vectors in each sentance and return list of vectors  
+    def getSumSentVecs(self, inList):
+        outList = []
+        for innerList in inList:
+            if len(innerList) > 0:
+                outList.append(sum([item.vector for item in innerList]))
+            else:
+                outList.append(np.array([0 for i in range(0, 300)]))
+        return outList
+
+    #for an input list of sentances and tag parts of speech, return a list with only tokens 
+    #that have parts of speech in the tags list 
+    def extractPOS(self, inList, tags):
+        outList = []
+        #get only specified parts of speech from spans
+        for item in inList:
+            tokenList = []
+            for token in item:
+
+                if token.pos_ in tags:
+                    tokenList.append(token)
+            outList.append(tokenList)
+        return outList
+
+    #for an input list of setances, return a similarity matrix of these sentances
+    #similarity is computed using only the parts of speech in tags
+    #the word vectors for each token in a sentance (only correct pos's) are added together to get sent. vectors 
+    def getPOSSim(self, inList, tags):
+        
+        #get only parts of speech from sentance 
+        posList = self.extractPOS(inList, tags)
+        
+        #sum together word embeddings of parts of speech in sentances 
+        sentVecs = self.getSumSentVecs(posList)
+
+        #get a similarity matrix of the sentVecs list of sentance vectors 
+        sims = [[1 - dist for dist in inner] for inner in self.getVectorDist(sentVecs)]
+
+        return sims
